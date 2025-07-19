@@ -291,72 +291,226 @@ class WebBrowser:
             await self.session.aclose()
 
 class TaskPlanner:
-    """AI task planning and decomposition"""
+    """Enhanced AI task planning with cognitive abilities"""
     
     def __init__(self, openrouter_client):
         self.openrouter_client = openrouter_client
     
-    async def plan_task(self, description: str, goal: str, context: Dict[str, Any] = None) -> List[Dict[str, Any]]:
-        """Break down complex task into executable steps"""
+    async def plan_task(self, description: str, goal: str, context: Dict[str, Any] = None, user_prefs: UserPreferences = None) -> List[Dict[str, Any]]:
+        """Enhanced task planning with reasoning and adaptability"""
         
+        # Determine communication style based on user preferences
+        comm_style = user_prefs.communication_style if user_prefs else "professional"
+        persona_prompt = self._get_persona_prompt(comm_style)
+        
+        # Chain-of-thought reasoning prompt
         planning_prompt = f"""
-You are an AI task planner. Break down this task into specific, executable steps.
+{persona_prompt}
+
+I need to break down this task using advanced reasoning and planning:
 
 Task Description: {description}
 Goal: {goal}
 Context: {context or 'None provided'}
+User Preferences: {user_prefs.dict() if user_prefs else 'Default settings'}
 
 Available capabilities:
-- Shell command execution (limited to safe commands)
-- Web browsing and content fetching
+- Shell command execution (security-restricted)
+- Web browsing and content fetching  
 - File operations (read/write in user directory)
 - Data analysis and processing
 - API calls and integrations
+- Adaptive error recovery
+- Self-reflection and learning
 
-Please create a detailed step-by-step plan. For each step, specify:
-1. Step number and description
-2. Action type (shell, web, api, analysis, etc.)
-3. Specific command or action to take
-4. Expected output or result
-5. Success criteria
+REASONING PROCESS:
+1. First, I'll analyze what the user really wants to achieve
+2. Then identify potential challenges and alternative approaches
+3. Break down into logical, prioritized steps
+4. Consider error scenarios and fallback plans
+5. Estimate time and complexity for each step
 
-Return the plan as a JSON array of step objects.
+Please create a detailed step-by-step plan with chain-of-thought reasoning. For each step:
+- Step number and clear description
+- Action type (shell, web, api, analysis, reflection, etc.)
+- Specific command or action
+- Expected output/result
+- Success criteria
+- Fallback plan if it fails
+- Priority level (1-5)
+- Estimated duration (minutes)
+
+Use this reasoning: "To achieve [goal], I need to first [reason], then [reason], because [logic]..."
+
+Return as JSON array of step objects with reasoning field.
 """
         
         try:
             response = await self.openrouter_client.chat_completion(
                 messages=[
-                    {"role": "system", "content": "You are an expert AI task planner. Always respond with valid JSON."},
+                    {"role": "system", "content": "You are an expert AI task planner with advanced reasoning capabilities. Always use chain-of-thought reasoning and respond with valid JSON."},
                     {"role": "user", "content": planning_prompt}
                 ],
                 model="mistralai/mistral-7b-instruct:free",
-                max_tokens=2000
+                max_tokens=3000,
+                temperature=0.3  # Lower temperature for more consistent planning
             )
             
             content = response["choices"][0]["message"]["content"]
             
-            # Try to extract JSON from response
-            import re
+            # Enhanced JSON extraction with fallback
+            steps = self._extract_json_steps(content, description, goal)
+            
+            # Apply intelligent prioritization
+            steps = self._prioritize_steps(steps, context)
+            
+            return steps
+                
+        except Exception as e:
+            logger.error(f"Enhanced task planning error: {e}")
+            # Intelligent fallback planning
+            return self._create_fallback_plan(description, goal)
+    
+    def _get_persona_prompt(self, style: str) -> str:
+        """Get persona-based prompt based on communication style"""
+        personas = {
+            "professional": "You are a professional AI assistant focused on efficiency and precision.",
+            "casual": "You are a friendly AI buddy who explains things in a relaxed, easy-going way.",
+            "friendly": "You are a warm and supportive AI companion who encourages and helps cheerfully.",
+            "technical": "You are a technical expert AI who provides detailed, accurate information with technical depth.",
+            "coach": "You are a motivational AI coach who guides users to achieve their goals step by step.",
+            "teacher": "You are a patient AI teacher who explains concepts clearly and asks clarifying questions."
+        }
+        return personas.get(style, personas["professional"])
+    
+    def _extract_json_steps(self, content: str, description: str, goal: str) -> List[Dict[str, Any]]:
+        """Enhanced JSON extraction with multiple fallback strategies"""
+        try:
+            # Try to extract JSON array
             json_match = re.search(r'\[.*\]', content, re.DOTALL)
             if json_match:
                 steps = json.loads(json_match.group())
-                return steps
+                return self._validate_and_enhance_steps(steps)
             else:
-                # Fallback: create basic steps
-                return [
-                    {
-                        "step": 1,
-                        "description": description,
-                        "action_type": "analysis",
-                        "command": "analyze_task",
-                        "expected_output": "Task analysis complete",
-                        "success_criteria": "Understanding achieved"
-                    }
-                ]
+                # Fallback: parse structured text
+                return self._parse_structured_text(content, description, goal)
+        except:
+            return self._create_fallback_plan(description, goal)
+    
+    def _validate_and_enhance_steps(self, steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Validate and enhance step objects"""
+        enhanced_steps = []
+        for i, step in enumerate(steps):
+            enhanced_step = {
+                "step": i + 1,
+                "description": step.get("description", f"Step {i+1}"),
+                "action_type": step.get("action_type", "analysis"),
+                "command": step.get("command", ""),
+                "expected_output": step.get("expected_output", ""),
+                "success_criteria": step.get("success_criteria", "Task completed"),
+                "fallback_plan": step.get("fallback_plan", "Retry with different approach"),
+                "priority": step.get("priority", 3),
+                "estimated_duration": step.get("estimated_duration", 5),
+                "reasoning": step.get("reasoning", "Standard execution step"),
+                "critical": step.get("critical", False)
+            }
+            enhanced_steps.append(enhanced_step)
+        return enhanced_steps
+    
+    def _prioritize_steps(self, steps: List[Dict[str, Any]], context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Apply intelligent prioritization to steps"""
+        for step in steps:
+            priority_score = step.get("priority", 3)
+            
+            # Boost priority for critical steps
+            if step.get("critical", False):
+                priority_score += 2
                 
-        except Exception as e:
-            logger.error(f"Task planning error: {e}")
-            return []
+            # Boost priority for prerequisite steps
+            if "setup" in step.get("description", "").lower():
+                priority_score += 1
+                
+            # Lower priority for optional steps
+            if "optional" in step.get("description", "").lower():
+                priority_score -= 1
+                
+            step["priority"] = max(1, min(5, priority_score))
+        
+        # Sort by priority (higher first)
+        return sorted(steps, key=lambda x: x.get("priority", 3), reverse=True)
+    
+    def _parse_structured_text(self, content: str, description: str, goal: str) -> List[Dict[str, Any]]:
+        """Parse structured text when JSON extraction fails"""
+        steps = []
+        lines = content.split('\n')
+        current_step = {}
+        step_count = 1
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            if line.lower().startswith(('step', f'{step_count}.', f'{step_count}:')):
+                if current_step:
+                    steps.append(current_step)
+                current_step = {
+                    "step": step_count,
+                    "description": line,
+                    "action_type": "analysis",
+                    "command": line,
+                    "priority": 3,
+                    "estimated_duration": 5
+                }
+                step_count += 1
+            elif current_step:
+                if "action" in line.lower():
+                    current_step["action_type"] = "shell" if "command" in line else "analysis"
+                elif "command" in line.lower():
+                    current_step["command"] = line.split(":", 1)[-1].strip()
+        
+        if current_step:
+            steps.append(current_step)
+            
+        return steps if steps else self._create_fallback_plan(description, goal)
+    
+    def _create_fallback_plan(self, description: str, goal: str) -> List[Dict[str, Any]]:
+        """Create intelligent fallback plan when parsing fails"""
+        return [
+            {
+                "step": 1,
+                "description": f"Analyze the task: {description}",
+                "action_type": "analysis",
+                "command": f"analyze_task: {description}",
+                "expected_output": "Task understanding and approach",
+                "success_criteria": "Clear understanding achieved",
+                "priority": 5,
+                "estimated_duration": 3,
+                "reasoning": "First step is to understand what needs to be done"
+            },
+            {
+                "step": 2,
+                "description": f"Execute main task toward goal: {goal}",
+                "action_type": "execution",
+                "command": f"execute_task: {goal}",
+                "expected_output": "Goal achievement",
+                "success_criteria": "Task completed successfully",
+                "priority": 4,
+                "estimated_duration": 10,
+                "reasoning": "Main execution step to achieve the goal"
+            },
+            {
+                "step": 3,
+                "description": "Verify results and provide summary",
+                "action_type": "reflection",
+                "command": "verify_and_summarize",
+                "expected_output": "Task completion summary",
+                "success_criteria": "Results verified and documented",
+                "priority": 3,
+                "estimated_duration": 2,
+                "reasoning": "Important to verify success and learn from the process"
+            }
+        ]
 
 class ChatGPTAgent:
     """Main ChatGPT Agent with autonomous capabilities"""
