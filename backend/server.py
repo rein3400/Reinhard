@@ -250,27 +250,211 @@ async def get_agent_task(
         raise HTTPException(status_code=404, detail="Agent task not found")
     return task
 
-# ChatGPT Agent endpoints
+# Enhanced ChatGPT Agent endpoints
 @api_router.post("/agents/chatgpt/tasks")
 async def create_chatgpt_task(
     task_data: dict,
     current_user: User = Depends(get_current_user)
 ):
-    """Create ChatGPT Agent task with autonomous capabilities."""
+    """Create enhanced ChatGPT Agent task with cognitive capabilities."""
     try:
         agent = get_agent(current_user.id, openrouter_client, database)
         
         task = await agent.create_task(
             task_type=task_data.get("task_type", "general"),
             description=task_data.get("description", ""),
-            goal=task_data.get("goal", "")
+            goal=task_data.get("goal", ""),
+            persona=task_data.get("persona", "assistant")
         )
         
-        return {"task_id": task.id, "status": task.status, "message": "ChatGPT Agent task created"}
+        return {
+            "task_id": task.id, 
+            "status": task.status, 
+            "message": "Enhanced ChatGPT Agent task created",
+            "persona": task.persona,
+            "priority_score": task.priority.priority_score if task.priority else 50
+        }
         
     except Exception as e:
-        logger.error(f"ChatGPT Agent task creation error: {e}")
+        logger.error(f"Enhanced ChatGPT Agent task creation error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create agent task: {str(e)}")
+
+@api_router.post("/agents/chatgpt/preferences")
+async def set_user_preferences(
+    preferences: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Set user preferences for personalized agent behavior."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        result = await agent.set_user_preferences(preferences)
+        return result
+    except Exception as e:
+        logger.error(f"Set preferences error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set preferences: {str(e)}")
+
+@api_router.get("/agents/chatgpt/preferences")
+async def get_user_preferences(current_user: User = Depends(get_current_user)):
+    """Get current user preferences."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        await agent.initialize_user_context()
+        if agent.user_preferences:
+            return {"preferences": agent.user_preferences.dict()}
+        return {"preferences": None}
+    except Exception as e:
+        logger.error(f"Get preferences error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get preferences: {str(e)}")
+
+@api_router.get("/agents/chatgpt/tasks/list")
+async def list_user_tasks(
+    limit: int = 50,
+    status_filter: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    """List user tasks with intelligence insights."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        tasks = await agent.list_user_tasks(limit=limit, status_filter=status_filter)
+        return {"tasks": tasks}
+    except Exception as e:
+        logger.error(f"List tasks error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list tasks: {str(e)}")
+
+@api_router.post("/agents/chatgpt/tasks/{task_id}/pause")
+async def pause_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Pause task execution."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        result = await agent.pause_task(task_id)
+        return result
+    except Exception as e:
+        logger.error(f"Pause task error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to pause task: {str(e)}")
+
+@api_router.post("/agents/chatgpt/tasks/{task_id}/resume")
+async def resume_task(
+    task_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Resume paused task."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        result = await agent.resume_task(task_id)
+        return result
+    except Exception as e:
+        logger.error(f"Resume task error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resume task: {str(e)}")
+
+@api_router.post("/agents/schedule/recurring")
+async def schedule_recurring_task(
+    schedule_data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Schedule a recurring task."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        
+        # Import TaskScheduler here to avoid circular imports
+        from chatgpt_agent import TaskScheduler
+        
+        if not hasattr(agent, 'scheduler'):
+            agent.scheduler = TaskScheduler(agent)
+        
+        schedule_id = await agent.scheduler.schedule_recurring_task(
+            task_type=schedule_data.get("task_type", "general"),
+            description=schedule_data.get("description", ""),
+            goal=schedule_data.get("goal", ""),
+            interval_minutes=schedule_data.get("interval_minutes", 60),
+            max_iterations=schedule_data.get("max_iterations")
+        )
+        
+        return {"schedule_id": schedule_id, "message": "Recurring task scheduled"}
+        
+    except Exception as e:
+        logger.error(f"Schedule recurring task error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to schedule task: {str(e)}")
+
+@api_router.delete("/agents/schedule/{schedule_id}")
+async def cancel_scheduled_task(
+    schedule_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Cancel a scheduled task."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        
+        if hasattr(agent, 'scheduler'):
+            success = await agent.scheduler.cancel_scheduled_task(schedule_id)
+            if success:
+                return {"message": "Scheduled task cancelled"}
+            else:
+                return {"error": "Scheduled task not found"}
+        
+        return {"error": "No scheduler found"}
+        
+    except Exception as e:
+        logger.error(f"Cancel scheduled task error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel task: {str(e)}")
+
+@api_router.get("/agents/chatgpt/analytics")
+async def get_agent_analytics(current_user: User = Depends(get_current_user)):
+    """Get agent analytics and insights."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        
+        # Get task statistics
+        all_tasks = await agent.list_user_tasks(limit=1000)
+        
+        analytics = {
+            "total_tasks": len(all_tasks),
+            "completed_tasks": len([t for t in all_tasks if t["status"] == "completed"]),
+            "failed_tasks": len([t for t in all_tasks if t["status"] == "failed"]),
+            "active_tasks": len([t for t in all_tasks if t["status"] in ["executing", "planning"]]),
+            "average_priority": sum(t["priority_score"] for t in all_tasks) / len(all_tasks) if all_tasks else 0,
+            "success_rate": len([t for t in all_tasks if t["status"] == "completed"]) / len(all_tasks) if all_tasks else 0,
+            "capabilities": {name: cap.dict() for name, cap in agent.capabilities.items()},
+            "tool_success_rates": agent.tool_selector.tool_success_rates if hasattr(agent, 'tool_selector') else {}
+        }
+        
+        return {"analytics": analytics}
+        
+    except Exception as e:
+        logger.error(f"Get analytics error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get analytics: {str(e)}")
+
+@api_router.post("/agents/chatgpt/reflect")
+async def trigger_reflection(
+    reflection_data: dict,
+    current_user: User = Depends(get_current_user)
+):
+    """Trigger self-reflection on a specific topic or task."""
+    try:
+        agent = get_agent(current_user.id, openrouter_client, database)
+        
+        # Create a mock task for reflection
+        from chatgpt_agent import AgentTask
+        mock_task = AgentTask(
+            user_id=current_user.id,
+            task_type="reflection",
+            description=reflection_data.get("topic", "General reflection"),
+            goal="Learn and improve from experience"
+        )
+        
+        reflection = await agent.reflection_engine.reflect_on_failure(
+            mock_task,
+            reflection_data.get("situation", "General situation"),
+            reflection_data.get("context", {})
+        )
+        
+        return {"reflection": reflection}
+        
+    except Exception as e:
+        logger.error(f"Trigger reflection error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to trigger reflection: {str(e)}")
 
 @api_router.post("/agents/chatgpt/tasks/{task_id}/execute")
 async def execute_chatgpt_task(
