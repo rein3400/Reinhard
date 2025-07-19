@@ -27,6 +27,39 @@ class AgentCapability(BaseModel):
     description: str
     enabled: bool = True
     security_level: str = "medium"  # low, medium, high, restricted
+    success_rate: float = 1.0
+    last_used: Optional[datetime] = None
+    usage_count: int = 0
+
+class UserPreferences(BaseModel):
+    """User personalization and memory"""
+    user_id: str
+    communication_style: str = "professional"  # professional, casual, friendly, technical
+    preferred_tools: List[str] = []
+    task_patterns: Dict[str, Any] = {}
+    feedback_history: List[Dict[str, Any]] = []
+    timezone: str = "UTC"
+    language: str = "en"
+    custom_instructions: str = ""
+
+class TaskPriority(BaseModel):
+    """Task prioritization system"""
+    task_id: str
+    priority_score: float  # 0-100
+    deadline: Optional[datetime] = None
+    dependencies: List[str] = []
+    estimated_duration: Optional[int] = None  # minutes
+    importance: str = "medium"  # low, medium, high, critical
+    urgency: str = "medium"  # low, medium, high, critical
+
+class AgentMemory(BaseModel):
+    """Agent memory and state tracking"""
+    user_id: str
+    session_context: Dict[str, Any] = {}
+    long_term_memory: Dict[str, Any] = {}
+    working_memory: Dict[str, Any] = {}
+    learned_patterns: Dict[str, Any] = {}
+    error_patterns: Dict[str, Any] = {}
 
 class AgentTask(BaseModel):
     id: str = None
@@ -35,11 +68,16 @@ class AgentTask(BaseModel):
     description: str
     goal: str
     steps: List[Dict[str, Any]] = []
-    status: str = "pending"  # pending, planning, executing, completed, failed
+    status: str = "pending"  # pending, planning, executing, completed, failed, paused
     result: Optional[Dict[str, Any]] = None
     logs: List[str] = []
     created_at: datetime = None
     updated_at: datetime = None
+    priority: TaskPriority = None
+    context: Dict[str, Any] = {}
+    retry_count: int = 0
+    reflection_notes: List[str] = []
+    persona: str = "assistant"  # assistant, expert, teacher, friend, coach
 
     def __init__(self, **data):
         if data.get('id') is None:
@@ -48,6 +86,11 @@ class AgentTask(BaseModel):
             data['created_at'] = datetime.utcnow()
         if data.get('updated_at') is None:
             data['updated_at'] = datetime.utcnow()
+        if data.get('priority') is None:
+            data['priority'] = TaskPriority(
+                task_id=data.get('id', str(uuid.uuid4())),
+                priority_score=50.0
+            )
         super().__init__(**data)
 
 class ShellExecutor:
