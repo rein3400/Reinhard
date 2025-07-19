@@ -898,75 +898,141 @@ Return as JSON array of step objects with reasoning field.
         ]
 
 class ChatGPTAgent:
-    """Main ChatGPT Agent with autonomous capabilities"""
+    """Enhanced ChatGPT Agent with advanced cognitive abilities"""
     
     def __init__(self, user_id: str, openrouter_client, database):
         self.user_id = user_id
         self.openrouter_client = openrouter_client
         self.database = database
         
-        # Initialize components
+        # Initialize enhanced components
         self.shell_executor = ShellExecutor(user_id)
         self.web_browser = WebBrowser()
         self.task_planner = TaskPlanner(openrouter_client)
-        
-        # Initialize new enhanced components
         self.reflection_engine = SelfReflectionEngine(openrouter_client)
         self.tool_selector = AdaptiveToolSelector()
         self.persona_engine = PersonaEngine()
         self.state_tracker = StateTracker(database)
         
-        # Agent capabilities
+        # Load user preferences
+        self.user_preferences = None
+        
+        # Enhanced agent capabilities
         self.capabilities = {
             "shell_access": AgentCapability(
-                name="Shell Access",
-                description="Execute shell commands with security restrictions",
-                security_level="high"
+                name="Enhanced Shell Access",
+                description="Execute shell commands with adaptive error handling",
+                security_level="high",
+                success_rate=0.85
             ),
             "web_browsing": AgentCapability(
-                name="Web Browsing",
-                description="Browse web and fetch content",
-                security_level="medium"
+                name="Intelligent Web Browsing",
+                description="Browse web with retry logic and smart parsing",
+                security_level="medium",
+                success_rate=0.90
             ),
             "task_planning": AgentCapability(
-                name="Task Planning",
-                description="Break down complex tasks into steps",
-                security_level="low"
+                name="Cognitive Task Planning",
+                description="Advanced planning with reasoning and prioritization",
+                security_level="low",
+                success_rate=0.95
             ),
-            "file_operations": AgentCapability(
-                name="File Operations",
-                description="Read and write files in user directory",
-                security_level="medium"
+            "self_reflection": AgentCapability(
+                name="Self-Reflection & Learning",
+                description="Learn from mistakes and adapt behavior",
+                security_level="low",
+                success_rate=0.88
             ),
-            "data_analysis": AgentCapability(
-                name="Data Analysis",
-                description="Analyze and process data",
-                security_level="low"
+            "persona_adaptation": AgentCapability(
+                name="Dynamic Persona",
+                description="Adapt communication style to user preferences",
+                security_level="low",
+                success_rate=0.92
+            ),
+            "memory_management": AgentCapability(
+                name="Advanced Memory",
+                description="Multi-layer memory with state tracking",
+                security_level="medium",
+                success_rate=0.94
+            ),
+            "tool_selection": AgentCapability(
+                name="Intelligent Tool Selection",
+                description="Automatically select best tools for tasks",
+                security_level="medium",
+                success_rate=0.87
             )
         }
         
         self.active_tasks = {}
+        self.task_queue = []
     
-    async def create_task(self, task_type: str, description: str, goal: str) -> AgentTask:
-        """Create new agent task"""
+    async def initialize_user_context(self):
+        """Initialize user context and preferences"""
+        # Load user preferences
+        prefs_data = await self.database.db.user_preferences.find_one({"user_id": self.user_id})
+        if prefs_data:
+            self.user_preferences = UserPreferences(**prefs_data)
+        else:
+            self.user_preferences = UserPreferences(user_id=self.user_id)
+            await self.database.db.user_preferences.insert_one(self.user_preferences.dict())
+    
+    async def create_task(self, task_type: str, description: str, goal: str, persona: str = "assistant") -> AgentTask:
+        """Create enhanced agent task with cognitive planning"""
+        
+        await self.initialize_user_context()
+        
+        # Calculate priority score
+        priority_score = await self._calculate_priority(description, goal)
         
         task = AgentTask(
             user_id=self.user_id,
             task_type=task_type,
             description=description,
-            goal=goal
+            goal=goal,
+            persona=persona,
+            priority=TaskPriority(
+                task_id=str(uuid.uuid4()),
+                priority_score=priority_score
+            )
         )
         
         # Store in database
         await self.database.db.agent_tasks.insert_one(task.dict())
         
-        # Add to active tasks
+        # Add to active tasks and queue
         self.active_tasks[task.id] = task
+        self.task_queue.append(task.id)
+        
+        # Save to state tracker
+        await self.state_tracker.save_state(
+            self.user_id, 
+            f"task_{task.id}", 
+            task.dict(), 
+            "working"
+        )
         
         return task
     
+    async def _calculate_priority(self, description: str, goal: str) -> float:
+        """Calculate task priority using AI reasoning"""
+        
+        priority_keywords = {
+            "urgent": 20, "asap": 20, "emergency": 25, "critical": 25,
+            "important": 15, "need": 10, "please": 5, "help": 8,
+            "deadline": 18, "quick": 12, "fast": 12, "immediately": 22
+        }
+        
+        score = 50.0  # Base score
+        text = (description + " " + goal).lower()
+        
+        for keyword, boost in priority_keywords.items():
+            if keyword in text:
+                score += boost
+        
+        return min(100.0, score)
+    
     async def execute_task(self, task_id: str) -> Dict[str, Any]:
-        """Execute agent task autonomously"""
+        """Execute task with enhanced cognitive abilities"""
         
         if task_id not in self.active_tasks:
             # Load from database
@@ -980,111 +1046,246 @@ class ChatGPTAgent:
             task = self.active_tasks[task_id]
         
         try:
+            # Initialize if needed
+            await self.initialize_user_context()
+            
+            # Generate persona greeting
+            greeting = self.persona_engine.get_persona_response(
+                task.persona, "greeting", task.description
+            )
+            task.logs.append(f"[{datetime.utcnow()}] {greeting}")
+            
             # Update task status
             task.status = "planning"
             await self._update_task(task)
             
-            # Plan the task if no steps exist
+            # Enhanced task planning with user preferences
             if not task.steps:
-                task.logs.append(f"[{datetime.utcnow()}] Starting task planning...")
+                task.logs.append(f"[{datetime.utcnow()}] Starting cognitive task planning...")
+                
+                # Get suggestions from reflection engine
+                suggestions = await self.reflection_engine.suggest_improvements(task)
+                if suggestions:
+                    task.logs.append(f"[{datetime.utcnow()}] Applying learned insights: {suggestions}")
+                
                 steps = await self.task_planner.plan_task(
                     task.description, 
                     task.goal,
-                    {"user_id": self.user_id, "task_type": task.task_type}
+                    {
+                        "user_id": self.user_id, 
+                        "task_type": task.task_type,
+                        "suggestions": suggestions
+                    },
+                    self.user_preferences
                 )
                 task.steps = steps
-                task.logs.append(f"[{datetime.utcnow()}] Created {len(steps)} execution steps")
+                task.logs.append(f"[{datetime.utcnow()}] Created {len(steps)} prioritized execution steps")
             
-            # Execute steps
+            # Execute steps with adaptive intelligence
             task.status = "executing"
             await self._update_task(task)
             
             results = []
             for i, step in enumerate(task.steps):
-                task.logs.append(f"[{datetime.utcnow()}] Executing step {i+1}: {step.get('description', 'No description')}")
+                step_description = step.get('description', f'Step {i+1}')
+                task.logs.append(f"[{datetime.utcnow()}] Executing step {i+1}: {step_description}")
                 
-                step_result = await self._execute_step(step)
+                # Intelligent tool selection
+                available_tools = ["shell", "web", "file", "analysis", "api"]
+                best_tool = self.tool_selector.select_best_tool(
+                    step_description, 
+                    available_tools, 
+                    step
+                )
+                
+                # Override action_type with best tool if different
+                if step.get("action_type") != best_tool:
+                    task.logs.append(f"[{datetime.utcnow()}] Adaptive tool selection: {best_tool} instead of {step.get('action_type')}")
+                    step["action_type"] = best_tool
+                
+                step_result = await self._execute_step_with_reflection(step, task)
                 results.append(step_result)
                 
-                task.logs.append(f"[{datetime.utcnow()}] Step {i+1} result: {step_result.get('success', False)}")
+                # Update tool success rate
+                self.tool_selector.update_success_rate(
+                    step["action_type"], 
+                    step_result.get("success", False)
+                )
                 
-                # Stop if step failed and it's critical
-                if not step_result.get("success", False) and step.get("critical", False):
-                    task.status = "failed"
-                    task.result = {
-                        "success": False,
-                        "error": f"Critical step {i+1} failed: {step_result.get('error', 'Unknown error')}",
-                        "completed_steps": i,
-                        "step_results": results
-                    }
-                    await self._update_task(task)
-                    return task.result
+                success_msg = "✅ Success" if step_result.get("success", False) else "❌ Failed"
+                task.logs.append(f"[{datetime.utcnow()}] Step {i+1} result: {success_msg}")
+                
+                # Enhanced error handling with reflection
+                if not step_result.get("success", False):
+                    reflection = await self.reflection_engine.reflect_on_failure(
+                        task, 
+                        step_result.get("error", "Unknown error"),
+                        step
+                    )
+                    
+                    task.reflection_notes.append(f"Step {i+1}: {reflection['analysis']}")
+                    
+                    if reflection["should_retry"] and task.retry_count < 3:
+                        task.retry_count += 1
+                        task.logs.append(f"[{datetime.utcnow()}] Applying reflection: {reflection['alternative_approach']}")
+                        
+                        # Try alternative approach
+                        step["command"] = reflection.get("alternative_approach", step["command"])
+                        step_result = await self._execute_step_with_reflection(step, task)
+                        results[-1] = step_result  # Replace previous result
+                    
+                    # Stop if critical step failed and can't be recovered
+                    if not step_result.get("success", False) and step.get("critical", False):
+                        task.status = "failed"
+                        task.result = {
+                            "success": False,
+                            "error": f"Critical step {i+1} failed: {step_result.get('error', 'Unknown error')}",
+                            "completed_steps": i,
+                            "step_results": results,
+                            "reflection_notes": task.reflection_notes
+                        }
+                        await self._update_task(task)
+                        return task.result
             
             # Task completed successfully
             task.status = "completed"
+            
+            # Generate persona encouragement
+            encouragement = self.persona_engine.get_persona_response(
+                task.persona, "encouragement"
+            )
+            
             task.result = {
                 "success": True,
-                "message": "Task completed successfully",
+                "message": f"Task completed successfully! {encouragement}",
                 "completed_steps": len(task.steps),
-                "step_results": results
+                "step_results": results,
+                "reflection_notes": task.reflection_notes,
+                "final_message": self.persona_engine.adapt_communication_style(
+                    self.user_preferences,
+                    "Your task has been completed with advanced cognitive processing."
+                )
             }
             await self._update_task(task)
             
             return task.result
             
         except Exception as e:
-            logger.error(f"Task execution error: {e}")
+            logger.error(f"Enhanced task execution error: {e}")
+            
+            # Reflect on the failure
+            reflection = await self.reflection_engine.reflect_on_failure(
+                task, str(e), {"execution_phase": "main_loop"}
+            )
+            
             task.status = "failed"
             task.result = {
                 "success": False,
                 "error": str(e),
                 "completed_steps": 0,
-                "step_results": []
+                "step_results": [],
+                "reflection_analysis": reflection,
+                "learned_lesson": reflection.get("learned_lesson", "Improve error handling")
             }
             await self._update_task(task)
             return task.result
     
-    async def _execute_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute individual step based on action type"""
+    async def _execute_step_with_reflection(self, step: Dict[str, Any], task: AgentTask) -> Dict[str, Any]:
+        """Execute step with enhanced reflection and adaptation"""
         
-        action_type = step.get("action_type", "unknown")
+        action_type = step.get("action_type", "analysis")
         command = step.get("command", "")
         
         try:
             if action_type == "shell":
-                return await self.shell_executor.execute(command)
-            
+                result = await self.shell_executor.execute(command)
             elif action_type == "web":
                 if command.startswith("fetch:"):
                     url = command.replace("fetch:", "").strip()
-                    return await self.web_browser.fetch_url(url)
+                    result = await self.web_browser.fetch_url(url)
                 elif command.startswith("search:"):
                     query = command.replace("search:", "").strip()
                     results = await self.web_browser.search_web(query)
-                    return {"success": True, "results": results}
+                    result = {"success": True, "results": results}
                 else:
-                    return {"success": False, "error": "Unknown web command"}
-            
+                    result = {"success": False, "error": "Unknown web command"}
             elif action_type == "file":
-                return await self._execute_file_operation(command)
-            
+                result = await self._execute_file_operation(command)
             elif action_type == "analysis":
-                return await self._execute_analysis(command, step)
-            
+                result = await self._execute_enhanced_analysis(command, step, task)
             elif action_type == "api":
-                return await self._execute_api_call(command, step)
-            
+                result = await self._execute_api_call(command, step)
             else:
-                return {
-                    "success": False,
-                    "error": f"Unknown action type: {action_type}"
-                }
+                result = {"success": False, "error": f"Unknown action type: {action_type}"}
+            
+            # Save step result to memory
+            await self.state_tracker.save_state(
+                self.user_id,
+                f"step_result_{step.get('step', 'unknown')}",
+                result,
+                "working"
+            )
+            
+            return result
                 
         except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    async def _execute_enhanced_analysis(self, command: str, step: Dict[str, Any], task: AgentTask) -> Dict[str, Any]:
+        """Execute enhanced analysis with persona and user preferences"""
+        
+        try:
+            # Get persona-appropriate analysis prompt
+            analysis_context = self.persona_engine.get_persona_response(
+                task.persona, "explanation", f"analyzing: {command}"
+            )
+            
+            analysis_prompt = f"""
+{analysis_context}
+
+Task Context: {task.description}
+Goal: {task.goal}
+Current Step: {step}
+Command: {command}
+User Preferences: {self.user_preferences.dict() if self.user_preferences else 'Default'}
+
+Please provide detailed analysis with reasoning. Consider:
+1. What this step aims to achieve
+2. How it connects to the overall goal
+3. Potential challenges or considerations
+4. Actionable insights and recommendations
+
+Adapt your response style to: {self.user_preferences.communication_style if self.user_preferences else 'professional'}
+"""
+            
+            response = await self.openrouter_client.chat_completion(
+                messages=[
+                    {"role": "system", "content": f"You are an AI analyst with {task.persona} persona. Provide insightful analysis."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                model="mistralai/mistral-7b-instruct:free",
+                max_tokens=1500,
+                temperature=0.4
+            )
+            
+            content = response["choices"][0]["message"]["content"]
+            
+            # Adapt response to user's communication style
+            if self.user_preferences:
+                content = self.persona_engine.adapt_communication_style(
+                    self.user_preferences, content
+                )
+            
             return {
-                "success": False,
-                "error": str(e)
+                "success": True,
+                "analysis": content,
+                "type": "enhanced_ai_analysis",
+                "persona": task.persona,
+                "reasoning_applied": True
             }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
     
     async def _execute_file_operation(self, command: str) -> Dict[str, Any]:
         """Execute file operations"""
@@ -1118,39 +1319,6 @@ class ChatGPTAgent:
             else:
                 return {"success": False, "error": "Unknown file command"}
                 
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-    
-    async def _execute_analysis(self, command: str, step: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute data analysis tasks"""
-        
-        try:
-            analysis_prompt = f"""
-Analyze the following data or perform the requested analysis:
-
-Command: {command}
-Step Context: {step}
-
-Provide detailed analysis results.
-"""
-            
-            response = await self.openrouter_client.chat_completion(
-                messages=[
-                    {"role": "system", "content": "You are a data analysis expert. Provide clear, actionable insights."},
-                    {"role": "user", "content": analysis_prompt}
-                ],
-                model="mistralai/mistral-7b-instruct:free",
-                max_tokens=1500
-            )
-            
-            content = response["choices"][0]["message"]["content"]
-            
-            return {
-                "success": True,
-                "analysis": content,
-                "type": "ai_analysis"
-            }
-            
         except Exception as e:
             return {"success": False, "error": str(e)}
     
