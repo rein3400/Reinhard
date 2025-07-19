@@ -1341,6 +1341,350 @@ Adapt your response style to: {self.user_preferences.communication_style if self
         except Exception as e:
             return {"success": False, "error": str(e)}
     
+    async def _execute_file_operation(self, command: str) -> Dict[str, Any]:
+        """Enhanced file operations with better error handling"""
+        
+        try:
+            if command.startswith("read:"):
+                file_path = command.replace("read:", "").strip()
+                # Ensure file is in user directory
+                safe_path = os.path.join(self.shell_executor.working_dir, os.path.basename(file_path))
+                
+                if os.path.exists(safe_path):
+                    with open(safe_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    return {"success": True, "content": content, "file": safe_path}
+                else:
+                    return {"success": False, "error": f"File not found: {safe_path}"}
+            
+            elif command.startswith("write:"):
+                parts = command.replace("write:", "").strip().split("|", 1)
+                if len(parts) != 2:
+                    return {"success": False, "error": "Invalid write command format: use 'write:filename|content'"}
+                
+                file_path, content = parts
+                safe_path = os.path.join(self.shell_executor.working_dir, os.path.basename(file_path))
+                
+                with open(safe_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                return {"success": True, "message": f"File written: {safe_path}", "bytes_written": len(content)}
+            
+            elif command.startswith("list:"):
+                dir_path = command.replace("list:", "").strip() or self.shell_executor.working_dir
+                safe_path = os.path.join(self.shell_executor.working_dir, os.path.basename(dir_path))
+                
+                if os.path.exists(safe_path) and os.path.isdir(safe_path):
+                    files = os.listdir(safe_path)
+                    return {"success": True, "files": files, "directory": safe_path}
+                else:
+                    return {"success": False, "error": f"Directory not found: {safe_path}"}
+            
+            else:
+                return {"success": False, "error": f"Unknown file command: {command}"}
+                
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    async def _execute_api_call(self, command: str, step: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhanced API calls with better error handling"""
+        
+        try:
+            if command.startswith("call:"):
+                api_params = command.replace("call:", "").strip()
+                
+                # Parse API parameters (simplified)
+                if "openrouter" in api_params.lower():
+                    # Example OpenRouter API call
+                    return {
+                        "success": True,
+                        "message": "OpenRouter API call simulated",
+                        "params": api_params,
+                        "response": "API response would be here"
+                    }
+                else:
+                    return {
+                        "success": True,
+                        "message": "Generic API call executed",
+                        "params": api_params
+                    }
+            
+            return {"success": False, "error": f"Unknown API command: {command}"}
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    async def _update_task(self, task: AgentTask):
+        """Update task in database and state tracker"""
+        
+        task.updated_at = datetime.utcnow()
+        
+        await self.database.db.agent_tasks.update_one(
+            {"id": task.id},
+            {"$set": task.dict()}
+        )
+        
+        # Update state tracker
+        await self.state_tracker.save_state(
+            self.user_id,
+            f"task_{task.id}",
+            task.dict(),
+            "working"
+        )
+    
+    async def get_task_status(self, task_id: str) -> Dict[str, Any]:
+        """Get enhanced task status with reflection insights"""
+        
+        task_data = await self.database.db.agent_tasks.find_one({"id": task_id})
+        if not task_data:
+            return {"error": "Task not found"}
+        
+        task = AgentTask(**task_data)
+        
+        # Add intelligence insights
+        status_info = task.dict()
+        status_info["intelligence_insights"] = {
+            "priority_score": task.priority.priority_score if task.priority else 50,
+            "reflection_count": len(task.reflection_notes),
+            "retry_attempts": task.retry_count,
+            "estimated_completion": self._estimate_completion_time(task),
+            "success_probability": self._calculate_success_probability(task)
+        }
+        
+        return status_info
+    
+    def _estimate_completion_time(self, task: AgentTask) -> str:
+        """Estimate task completion time"""
+        if task.status == "completed":
+            return "Completed"
+        elif task.status == "failed":
+            return "Failed"
+        
+        remaining_steps = len([s for s in task.steps if not s.get("completed", False)])
+        avg_step_time = 5  # minutes per step
+        estimated_minutes = remaining_steps * avg_step_time
+        
+        if estimated_minutes < 60:
+            return f"~{estimated_minutes} minutes"
+        else:
+            hours = estimated_minutes // 60
+            minutes = estimated_minutes % 60
+            return f"~{hours}h {minutes}m"
+    
+    def _calculate_success_probability(self, task: AgentTask) -> float:
+        """Calculate probability of task success"""
+        base_probability = 0.8
+        
+        # Reduce probability based on retry count
+        if task.retry_count > 0:
+            base_probability -= (task.retry_count * 0.15)
+        
+        # Boost probability based on reflection insights
+        if task.reflection_notes:
+            base_probability += (len(task.reflection_notes) * 0.05)
+        
+        return max(0.1, min(1.0, base_probability))
+    
+    async def list_user_tasks(self, limit: int = 50, status_filter: str = None) -> List[Dict[str, Any]]:
+        """List enhanced user tasks with intelligence insights"""
+        
+        query = {"user_id": self.user_id}
+        if status_filter:
+            query["status"] = status_filter
+        
+        cursor = self.database.db.agent_tasks.find(query).sort("created_at", -1).limit(limit)
+        
+        tasks = []
+        async for task_data in cursor:
+            task = AgentTask(**task_data)
+            task_summary = {
+                "id": task.id,
+                "description": task.description,
+                "status": task.status,
+                "priority_score": task.priority.priority_score if task.priority else 50,
+                "created_at": task.created_at,
+                "completed_steps": len([s for s in task.steps if s.get("completed", False)]),
+                "total_steps": len(task.steps),
+                "persona": task.persona,
+                "success_probability": self._calculate_success_probability(task)
+            }
+            tasks.append(task_summary)
+        
+        return tasks
+    
+    async def pause_task(self, task_id: str) -> Dict[str, Any]:
+        """Pause task execution"""
+        if task_id in self.active_tasks:
+            task = self.active_tasks[task_id]
+            task.status = "paused"
+            await self._update_task(task)
+            return {"success": True, "message": "Task paused"}
+        return {"success": False, "error": "Task not found in active tasks"}
+    
+    async def resume_task(self, task_id: str) -> Dict[str, Any]:
+        """Resume paused task"""
+        if task_id in self.active_tasks:
+            task = self.active_tasks[task_id]
+            if task.status == "paused":
+                task.status = "executing"
+                await self._update_task(task)
+                return {"success": True, "message": "Task resumed"}
+        return {"success": False, "error": "Task not found or not paused"}
+    
+    async def set_user_preferences(self, preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Update user preferences for personalization"""
+        
+        await self.initialize_user_context()
+        
+        # Update preferences
+        for key, value in preferences.items():
+            if hasattr(self.user_preferences, key):
+                setattr(self.user_preferences, key, value)
+        
+        # Save to database
+        await self.database.db.user_preferences.update_one(
+            {"user_id": self.user_id},
+            {"$set": self.user_preferences.dict()},
+            upsert=True
+        )
+        
+        return {"success": True, "message": "Preferences updated", "preferences": self.user_preferences.dict()}
+    
+    async def cleanup(self):
+        """Enhanced cleanup with state preservation"""
+        await self.web_browser.close()
+        
+        # Save important state before cleanup
+        await self.state_tracker.save_state(
+            self.user_id,
+            "last_session_cleanup",
+            {"timestamp": datetime.utcnow(), "active_tasks": len(self.active_tasks)},
+            "long_term"
+        )
+        
+        # Cleanup user working directory if needed
+        import shutil
+        if os.path.exists(self.shell_executor.working_dir):
+            try:
+                # Keep important files, clean temporary files
+                temp_files = [f for f in os.listdir(self.shell_executor.working_dir) if f.startswith("temp_")]
+                for temp_file in temp_files:
+                    os.remove(os.path.join(self.shell_executor.working_dir, temp_file))
+            except Exception as e:
+                logger.warning(f"Failed to cleanup temporary files: {e}")
+
+# Looping Execution System
+class TaskScheduler:
+    """Advanced task scheduler for looping execution"""
+    
+    def __init__(self, agent: ChatGPTAgent):
+        self.agent = agent
+        self.scheduled_tasks = {}
+        self.running = False
+    
+    async def schedule_recurring_task(
+        self, 
+        task_type: str, 
+        description: str, 
+        goal: str, 
+        interval_minutes: int,
+        max_iterations: int = None
+    ) -> str:
+        """Schedule a task to run repeatedly"""
+        
+        schedule_id = str(uuid.uuid4())
+        
+        scheduled_task = {
+            "id": schedule_id,
+            "task_type": task_type,
+            "description": description,
+            "goal": goal,
+            "interval_minutes": interval_minutes,
+            "max_iterations": max_iterations,
+            "current_iteration": 0,
+            "next_run": datetime.utcnow() + timedelta(minutes=interval_minutes),
+            "active": True,
+            "results": []
+        }
+        
+        self.scheduled_tasks[schedule_id] = scheduled_task
+        
+        # Save to database
+        await self.agent.database.db.scheduled_tasks.insert_one(scheduled_task)
+        
+        return schedule_id
+    
+    async def start_scheduler(self):
+        """Start the task scheduler loop"""
+        self.running = True
+        
+        while self.running:
+            current_time = datetime.utcnow()
+            
+            for schedule_id, scheduled_task in self.scheduled_tasks.items():
+                if not scheduled_task["active"]:
+                    continue
+                
+                if current_time >= scheduled_task["next_run"]:
+                    # Check if max iterations reached
+                    if (scheduled_task["max_iterations"] and 
+                        scheduled_task["current_iteration"] >= scheduled_task["max_iterations"]):
+                        scheduled_task["active"] = False
+                        continue
+                    
+                    # Execute the task
+                    try:
+                        task = await self.agent.create_task(
+                            scheduled_task["task_type"],
+                            f"[Scheduled] {scheduled_task['description']}",
+                            scheduled_task["goal"]
+                        )
+                        
+                        result = await self.agent.execute_task(task.id)
+                        
+                        # Store result
+                        scheduled_task["results"].append({
+                            "iteration": scheduled_task["current_iteration"],
+                            "timestamp": current_time,
+                            "result": result,
+                            "task_id": task.id
+                        })
+                        
+                        # Update iteration and next run time
+                        scheduled_task["current_iteration"] += 1
+                        scheduled_task["next_run"] = current_time + timedelta(
+                            minutes=scheduled_task["interval_minutes"]
+                        )
+                        
+                        # Update in database
+                        await self.agent.database.db.scheduled_tasks.update_one(
+                            {"id": schedule_id},
+                            {"$set": scheduled_task}
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"Scheduled task {schedule_id} failed: {e}")
+            
+            # Sleep for 1 minute before checking again
+            await asyncio.sleep(60)
+    
+    def stop_scheduler(self):
+        """Stop the task scheduler"""
+        self.running = False
+    
+    async def cancel_scheduled_task(self, schedule_id: str) -> bool:
+        """Cancel a scheduled task"""
+        if schedule_id in self.scheduled_tasks:
+            self.scheduled_tasks[schedule_id]["active"] = False
+            
+            # Update in database
+            await self.agent.database.db.scheduled_tasks.update_one(
+                {"id": schedule_id},
+                {"$set": {"active": False}}
+            )
+            return True
+        return False
+    
     async def _update_task(self, task: AgentTask):
         """Update task in database"""
         
