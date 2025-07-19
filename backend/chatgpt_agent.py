@@ -212,6 +212,293 @@ class ShellExecutor:
                 "exit_code": -1
             }
 
+class SelfReflectionEngine:
+    """Self-reflection and adaptive learning system"""
+    
+    def __init__(self, openrouter_client):
+        self.openrouter_client = openrouter_client
+        self.reflection_history = []
+    
+    async def reflect_on_failure(self, task: AgentTask, error: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze failure and suggest improvements"""
+        
+        reflection_prompt = f"""
+I need to reflect on this failure and learn from it:
+
+Task: {task.description}
+Goal: {task.goal}
+Error: {error}
+Context: {context}
+Previous attempts: {task.retry_count}
+
+Please analyze:
+1. What went wrong and why?
+2. What could be done differently?
+3. Are there alternative approaches?
+4. What should I remember for similar tasks?
+5. Should I retry or abort?
+
+Provide a JSON response with: analysis, alternative_approach, should_retry, learned_lesson, confidence_level
+"""
+        
+        try:
+            response = await self.openrouter_client.chat_completion(
+                messages=[
+                    {"role": "system", "content": "You are an AI that learns from mistakes and adapts. Provide thoughtful analysis."},
+                    {"role": "user", "content": reflection_prompt}
+                ],
+                model="mistralai/mistral-7b-instruct:free",
+                max_tokens=1000
+            )
+            
+            content = response["choices"][0]["message"]["content"]
+            
+            # Try to extract JSON
+            try:
+                reflection_data = json.loads(content)
+            except:
+                # Fallback structured response
+                reflection_data = {
+                    "analysis": f"Failed due to: {error}",
+                    "alternative_approach": "Try different method or parameters",
+                    "should_retry": task.retry_count < 3,
+                    "learned_lesson": f"Remember to handle {error} type errors",
+                    "confidence_level": 0.7
+                }
+            
+            # Store reflection for learning
+            self.reflection_history.append({
+                "timestamp": datetime.utcnow(),
+                "task_type": task.task_type,
+                "error": error,
+                "reflection": reflection_data
+            })
+            
+            return reflection_data
+            
+        except Exception as e:
+            logger.error(f"Reflection error: {e}")
+            return {
+                "analysis": "Unable to analyze failure",
+                "alternative_approach": "Retry with caution",
+                "should_retry": False,
+                "learned_lesson": "Improve error handling",
+                "confidence_level": 0.3
+            }
+    
+    async def suggest_improvements(self, task: AgentTask) -> List[str]:
+        """Suggest improvements based on reflection history"""
+        
+        similar_tasks = [
+            r for r in self.reflection_history 
+            if r["task_type"] == task.task_type
+        ]
+        
+        suggestions = []
+        for reflection in similar_tasks[-3:]:  # Last 3 similar tasks
+            suggestions.append(reflection["reflection"]["learned_lesson"])
+        
+        return suggestions
+
+class AdaptiveToolSelector:
+    """Intelligent tool selection based on context and success rates"""
+    
+    def __init__(self):
+        self.tool_success_rates = {
+            "shell": 0.85,
+            "web": 0.90,
+            "file": 0.95,
+            "api": 0.80,
+            "analysis": 0.95
+        }
+        self.tool_usage_patterns = {}
+    
+    def select_best_tool(self, task_description: str, available_tools: List[str], context: Dict[str, Any] = None) -> str:
+        """Select the best tool based on context and success rates"""
+        
+        # Analyze task description for keywords
+        task_lower = task_description.lower()
+        
+        tool_scores = {}
+        for tool in available_tools:
+            base_score = self.tool_success_rates.get(tool, 0.5)
+            
+            # Boost score based on keywords
+            if tool == "web" and any(keyword in task_lower for keyword in ["browse", "search", "website", "url", "internet"]):
+                base_score += 0.2
+            elif tool == "shell" and any(keyword in task_lower for keyword in ["command", "execute", "run", "script"]):
+                base_score += 0.2
+            elif tool == "file" and any(keyword in task_lower for keyword in ["file", "read", "write", "save", "document"]):
+                base_score += 0.2
+            elif tool == "api" and any(keyword in task_lower for keyword in ["api", "service", "request", "call"]):
+                base_score += 0.2
+            elif tool == "analysis" and any(keyword in task_lower for keyword in ["analyze", "think", "reason", "understand"]):
+                base_score += 0.2
+            
+            tool_scores[tool] = base_score
+        
+        # Select tool with highest score
+        best_tool = max(tool_scores.items(), key=lambda x: x[1])[0]
+        
+        # Update usage patterns
+        if task_description not in self.tool_usage_patterns:
+            self.tool_usage_patterns[task_description] = {}
+        self.tool_usage_patterns[task_description][best_tool] = \
+            self.tool_usage_patterns[task_description].get(best_tool, 0) + 1
+        
+        return best_tool
+    
+    def update_success_rate(self, tool: str, success: bool):
+        """Update tool success rate based on feedback"""
+        current_rate = self.tool_success_rates.get(tool, 0.5)
+        
+        # Simple moving average update
+        if success:
+            self.tool_success_rates[tool] = min(1.0, current_rate + 0.05)
+        else:
+            self.tool_success_rates[tool] = max(0.1, current_rate - 0.05)
+
+class PersonaEngine:
+    """Dynamic persona and communication style management"""
+    
+    def __init__(self):
+        self.personas = {
+            "assistant": {
+                "tone": "professional and helpful",
+                "style": "clear and concise",
+                "greeting": "I'm here to help you with",
+                "encouragement": "Let's work on this together"
+            },
+            "expert": {
+                "tone": "knowledgeable and precise", 
+                "style": "detailed and technical",
+                "greeting": "Based on my analysis of",
+                "encouragement": "This approach should be effective"
+            },
+            "teacher": {
+                "tone": "patient and educational",
+                "style": "step-by-step explanations",
+                "greeting": "Let me help you understand",
+                "encouragement": "You're making great progress"
+            },
+            "friend": {
+                "tone": "casual and supportive",
+                "style": "friendly and encouraging",
+                "greeting": "Hey! I'd love to help you with",
+                "encouragement": "You've got this!"
+            },
+            "coach": {
+                "tone": "motivational and goal-oriented",
+                "style": "action-focused guidance",
+                "greeting": "Let's achieve your goal of",
+                "encouragement": "Every step gets you closer to success"
+            }
+        }
+    
+    def get_persona_response(self, persona: str, message_type: str, context: str = "") -> str:
+        """Generate persona-appropriate response"""
+        
+        persona_config = self.personas.get(persona, self.personas["assistant"])
+        
+        if message_type == "greeting":
+            return f"{persona_config['greeting']} {context}."
+        elif message_type == "encouragement":
+            return persona_config["encouragement"]
+        elif message_type == "explanation":
+            if persona == "teacher":
+                return f"Let me explain this step by step: {context}"
+            elif persona == "expert":
+                return f"From a technical perspective: {context}"
+            elif persona == "friend":
+                return f"So basically, {context}"
+            elif persona == "coach":
+                return f"Here's your action plan: {context}"
+            else:
+                return context
+        
+        return context
+    
+    def adapt_communication_style(self, user_prefs: UserPreferences, message: str) -> str:
+        """Adapt message to user's preferred communication style"""
+        
+        style = user_prefs.communication_style
+        
+        if style == "casual":
+            message = message.replace("I will", "I'll").replace("you will", "you'll")
+            message = message.replace("I shall", "I'll").replace("cannot", "can't")
+        elif style == "technical":
+            message = f"Technical execution: {message}"
+        elif style == "friendly":
+            message = f"😊 {message}"
+        
+        return message
+
+class StateTracker:
+    """Enhanced state tracking and memory management"""
+    
+    def __init__(self, database):
+        self.database = database
+        self.user_memories = {}
+    
+    async def save_state(self, user_id: str, key: str, value: Any, state_type: str = "session"):
+        """Save state to appropriate memory type"""
+        
+        if user_id not in self.user_memories:
+            self.user_memories[user_id] = AgentMemory(user_id=user_id)
+        
+        memory = self.user_memories[user_id]
+        
+        if state_type == "session":
+            memory.session_context[key] = value
+        elif state_type == "working":
+            memory.working_memory[key] = value
+        elif state_type == "long_term":
+            memory.long_term_memory[key] = value
+        elif state_type == "pattern":
+            memory.learned_patterns[key] = value
+        
+        # Persist to database
+        await self.database.db.agent_memory.update_one(
+            {"user_id": user_id},
+            {"$set": {f"{state_type}_memory.{key}": value}},
+            upsert=True
+        )
+    
+    async def get_state(self, user_id: str, key: str, state_type: str = "session") -> Any:
+        """Retrieve state from memory"""
+        
+        if user_id not in self.user_memories:
+            # Load from database
+            memory_data = await self.database.db.agent_memory.find_one({"user_id": user_id})
+            if memory_data:
+                self.user_memories[user_id] = AgentMemory(**memory_data)
+            else:
+                self.user_memories[user_id] = AgentMemory(user_id=user_id)
+        
+        memory = self.user_memories[user_id]
+        
+        if state_type == "session":
+            return memory.session_context.get(key)
+        elif state_type == "working":
+            return memory.working_memory.get(key)
+        elif state_type == "long_term":
+            return memory.long_term_memory.get(key)
+        elif state_type == "pattern":
+            return memory.learned_patterns.get(key)
+        
+        return None
+    
+    async def clear_session_memory(self, user_id: str):
+        """Clear session memory but keep long-term learning"""
+        if user_id in self.user_memories:
+            self.user_memories[user_id].session_context = {}
+            self.user_memories[user_id].working_memory = {}
+        
+        await self.database.db.agent_memory.update_one(
+            {"user_id": user_id},
+            {"$set": {"session_context": {}, "working_memory": {}}}
+        )
+
 class WebBrowser:
     """Web browsing and interaction capabilities"""
     
