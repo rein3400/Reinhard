@@ -500,6 +500,104 @@ class StateTracker:
         )
 
 class WebBrowser:
+    """Enhanced web browsing and interaction capabilities"""
+    
+    def __init__(self, user_agent: str = None):
+        self.user_agent = user_agent or "ReinhardAI-Agent/2.0 (Advanced Web Assistant)"
+        self.session = None
+        self.success_rate = 0.9
+    
+    async def get_session(self):
+        """Get or create HTTP session"""
+        if self.session is None:
+            self.session = httpx.AsyncClient(
+                headers={"User-Agent": self.user_agent},
+                timeout=30.0,
+                follow_redirects=True
+            )
+        return self.session
+    
+    async def fetch_url(self, url: str, retries: int = 3) -> Dict[str, Any]:
+        """Enhanced URL fetching with retry logic"""
+        for attempt in range(retries):
+            try:
+                session = await self.get_session()
+                response = await session.get(url)
+                
+                result = {
+                    "success": True,
+                    "status_code": response.status_code,
+                    "content": response.text,
+                    "headers": dict(response.headers),
+                    "url": str(response.url),
+                    "attempt": attempt + 1
+                }
+                
+                # Update success rate
+                self.success_rate = min(1.0, self.success_rate + 0.01)
+                return result
+                
+            except Exception as e:
+                if attempt == retries - 1:  # Last attempt
+                    self.success_rate = max(0.1, self.success_rate - 0.05)
+                    return {
+                        "success": False,
+                        "error": str(e),
+                        "status_code": 0,
+                        "content": "",
+                        "headers": {},
+                        "url": url,
+                        "attempts": retries
+                    }
+                
+                # Wait before retry
+                await asyncio.sleep(1 * (attempt + 1))
+        
+        return {"success": False, "error": "Max retries exceeded"}
+    
+    async def search_web(self, query: str, num_results: int = 5) -> List[Dict[str, Any]]:
+        """Enhanced web search with better parsing"""
+        try:
+            search_url = f"https://duckduckgo.com/html/?q={query}&s=0&dc={num_results}"
+            result = await self.fetch_url(search_url)
+            
+            if result["success"]:
+                content = result["content"]
+                results = []
+                
+                # Enhanced parsing (simplified - would use BeautifulSoup in production)
+                import re
+                
+                # Better regex patterns
+                link_pattern = r'href="(/l/\?uddg=.*?)"'
+                title_pattern = r'class="result__title">.*?<a.*?>(.*?)</a>'
+                snippet_pattern = r'class="result__snippet">(.*?)</span>'
+                
+                links = re.findall(link_pattern, content)
+                titles = re.findall(title_pattern, content, re.DOTALL)
+                snippets = re.findall(snippet_pattern, content, re.DOTALL)
+                
+                for i in range(min(len(links), len(titles), num_results)):
+                    results.append({
+                        "title": re.sub(r'<[^>]+>', '', titles[i]).strip(),
+                        "link": f"https://duckduckgo.com{links[i]}",
+                        "snippet": re.sub(r'<[^>]+>', '', snippets[i] if i < len(snippets) else "").strip()[:200]
+                    })
+                
+                return results
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Enhanced web search error: {e}")
+            return []
+    
+    async def close(self):
+        """Close HTTP session"""
+        if self.session:
+            await self.session.aclose()
+
+class WebBrowser:
     """Web browsing and interaction capabilities"""
     
     def __init__(self, user_agent: str = None):
