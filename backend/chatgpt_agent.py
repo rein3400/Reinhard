@@ -812,6 +812,12 @@ class ChatGPTAgent:
         self.web_browser = WebBrowser()
         self.task_planner = TaskPlanner(openrouter_client)
         
+        # Initialize new enhanced components
+        self.reflection_engine = SelfReflectionEngine(openrouter_client)
+        self.tool_selector = AdaptiveToolSelector()
+        self.persona_engine = PersonaEngine()
+        self.state_tracker = StateTracker(database)
+        
         # Agent capabilities
         self.capabilities = {
             "shell_access": AgentCapability(
